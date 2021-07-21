@@ -13,23 +13,25 @@ object Main {
         val spark = SparkSession.builder.appName("HelloWorld Application").getOrCreate()
 
         spark.sparkContext.setLogLevel("WARN")
-
         println(s"Hello World")
 
-        val df = spark.read.
-            options(Map("inferSchema"->"true",
-                         "delimiter"->",",
-                         "header"->"true")).
-            csv("file:///workspace/data/iris.csv")
+        val df = spark.read
+            .options(Map("inferSchema" -> "true",
+                         "delimiter" -> ",",
+                         "header" -> "true"))
+            .csv("file:///workspace/data/iris.csv")
         df.printSchema()
 
-        val assembler = new VectorAssembler().
-            setInputCols(Array("sepal_length", "sepal_width", "petal_length", "petal_width")).
-            setOutputCol("features")
+        val assembler = new VectorAssembler()
+            .setInputCols(Array("sepal_length",
+                                "sepal_width",
+                                "petal_length",
+                                "petal_width"))
+            .setOutputCol("features")
 
-        val indexer = new StringIndexer().
-            setInputCol("variety").
-            setOutputCol("varietyInt")
+        val indexer = new StringIndexer()
+            .setInputCol("variety")
+            .setOutputCol("varietyInt")
 
         var df_ml = assembler.transform(df)
         df_ml = indexer.fit(df_ml).transform(df_ml)
