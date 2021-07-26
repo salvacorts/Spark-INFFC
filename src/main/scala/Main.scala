@@ -3,8 +3,15 @@ import org.apache.spark.ml.feature.{VectorAssembler, StringIndexer}
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import org.apache.spark.ml.classification.KNNClassifier
 import org.apache.spark.ml.knn.KNN
-
 import scala.collection.mutable
+import org.apache.spark.ml.noise.VoteEnsemble
+import org.apache.spark.ml.noise.VotingSchema
+import org.apache.spark.ml.classification.DecisionTreeClassifier
+import org.apache.spark.ml.classification.RandomForestClassifier
+import org.apache.spark.ml.classification.MultilayerPerceptronClassifier
+import org.apache.spark.ml.classification.LogisticRegression
+import org.apache.spark.ml.Model
+import org.apache.spark.ml.Estimator
 
 object Main {
     val K = 5
@@ -49,7 +56,8 @@ object Main {
         val results_df = model.transform(df_ml)
         results_df.printSchema()
         results_df.show()
-
+        
+        println("\n\n--- KNN ---")
         results_df.collect.foreach(sample => {
             val original_features = sample.getAs[Vector]("features")
             val original_variety = sample.getAs[Double]("varietyInt")
@@ -63,6 +71,37 @@ object Main {
                 val variety = neighbor.getAs[Double]("varietyInt")
                 println(s"Neighbor: $features - $variety")
             })
+        })
+
+        println("\n\n--- Voting Ensemble ---")
+        val classifiers = Array[Estimator[_]](
+            new DecisionTreeClassifier()
+                .setLabelCol("varietyInt")
+                .setFeaturesCol("features"),
+
+            new RandomForestClassifier()
+                .setLabelCol("varietyInt")
+                .setFeaturesCol("features")
+                .setNumTrees(10),
+
+            new LogisticRegression()
+                .setLabelCol("varietyInt")
+                .setFeaturesCol("features")
+        )
+
+        val ensemble = new VoteEnsemble()
+            .setVotingSchema(VotingSchema.Majority)
+            .setClassifiers(classifiers)
+
+        val ensemble_model = ensemble.fit(df_ml)
+        val vote_result = ensemble_model.transform(df_ml)
+        vote_result.printSchema()
+        vote_result.show()
+
+        vote_result.collect.map(sample => {
+            val original_features = sample.getAs[Vector]("features")
+            val original_variety = sample.getAs[Double]("varietyInt")
+            println(s"\nSample: $original_features - $original_variety")
         })
 
         spark.stop()
