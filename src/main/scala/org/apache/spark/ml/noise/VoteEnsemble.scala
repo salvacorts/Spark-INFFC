@@ -17,6 +17,7 @@ import org.apache.spark.sql.types.ArrayType
 import org.apache.spark.sql.types.DoubleType
 import org.apache.spark.ml.param.shared.HasLabelCol
 import org.apache.spark.ml.param.shared.HasFeaturesCol
+import org.apache.spark.sql.types.BooleanType
 
 object VotingSchema extends Enumeration{
     type VotingSchema = Value
@@ -40,7 +41,6 @@ class VoteEnsembleModel(override val uid: String,
         this(Identifiable.randomUID("VoteEnsembleModel"), models)
 
     override def transform(dataset: Dataset[_]): DataFrame = {
-        // TODO: Use SQL
         val dataset_ids = dataset.withColumn("id", monotonicallyIncreasingId)
 
         val predictions = models.zipWithIndex.map{
@@ -62,8 +62,8 @@ class VoteEnsembleModel(override val uid: String,
             .drop(pred_cols:_*)
             .drop("id")
 
-        val veredictUDF = udf { (predictions: Array[Double], label: Double) => {
-            val votes = predictions.map(p => {if (p == label) true else false})
+        val noisyUDF = udf { (predictions: Array[Double], label: Double) => {
+            val votes = predictions.map(p => {if (p != label) true else false})
             if ($(votingSchema) == VotingSchema.Majority) {
                 votes.groupBy(identity).mapValues(_.size).maxBy(_._2)._1
             } else { // Consensus
@@ -72,13 +72,13 @@ class VoteEnsembleModel(override val uid: String,
         }}
 
         dataset_with_votes.withColumn(
-            "veredict_clean", veredictUDF(col("predictions"), col($(labelCol))))
+            "noisy", noisyUDF(col("predictions"), col($(labelCol))))
     }
 
     override def transformSchema(schema: StructType): StructType = {
         StructType(schema.fields ++ Array(
-            new StructField("predicitions", ArrayType(DoubleType), true),
-            new StructField("veredict_clean", DoubleType, true)))
+            new StructField("predictions", ArrayType(DoubleType), true),
+            new StructField("noisy", BooleanType, true)))
     }
 
     override def copy(extra: ParamMap): VoteEnsembleModel = defaultCopy(extra)
@@ -91,12 +91,14 @@ class VoteEnsemble(override val uid: String)
 
     def setClassifiers(value: Array[Estimator[_]]): this.type = set(classifiers, value)
     def setVotingSchema(value: VotingSchema.VotingSchema): this.type = set(votingSchema, value)
+    def setLabelCol(value: String): this.type =  set(labelCol, value)
 
-    override def fit(dataset: Dataset[_]): VoteEnsembleModel = {
+    override def fit(dataset: Dataset[_]): VoteEnsembleModel = {        
         val trained_models = $(classifiers).map(classifier => {
             classifier.fit(dataset).asInstanceOf[Model[_]]
         })
-        new VoteEnsembleModel(trained_models)
+
+        copyValues(new VoteEnsembleModel(trained_models).setParent(this))
     }
   
     override def transformSchema(schema: StructType): StructType = schema
