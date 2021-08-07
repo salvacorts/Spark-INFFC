@@ -14,6 +14,8 @@ import org.apache.spark.ml.knn.KNN
 import org.apache.spark.ml.noise.VoteEnsemble
 import org.apache.spark.ml.noise.VotingSchema
 import org.apache.spark.ml.noise.INFFC
+import org.apache.log4j.Logger
+import org.apache.log4j.Level
 
 object Main {
     val K = 5
@@ -70,6 +72,9 @@ object Main {
             .setNoiseScoreThreshold(0.0)
             .setStopCriteriaG(3)
             .setStopCriteriaP(0.01)
+
+        val infcc_logger = Logger.getLogger(infcc.getClass().getName())
+        infcc_logger.setLevel(Level.DEBUG)
 
         val clean_df = infcc.transform(df_ml)
 
