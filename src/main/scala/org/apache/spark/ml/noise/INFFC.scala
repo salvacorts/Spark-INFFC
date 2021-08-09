@@ -104,14 +104,14 @@ class INFFC(override val uid: String) extends Transformer
         current_df
     }
 
-    private def preliminaryNoiseFilter(
+    private[ml] def preliminaryNoiseFilter(
             vote_ensemble: VoteEnsemble,
             dataset: DataFrame): DataFrame = {    
         val vote_result = vote_ensemble.fit(dataset).transform(dataset)
         vote_result.filter("noisy == false")
     }
 
-    private def noiseFreeFiltering(
+    private[ml] def noiseFreeFiltering(
             vote_ensemble: VoteEnsemble,
             dataset: DataFrame,                    
             noise_free_df: DataFrame): DataFrame = {
@@ -156,7 +156,7 @@ class INFFC(override val uid: String) extends Transformer
                     dataset.columns.takeRight(dataset.columns.length-1): _*)
     }
 
-    private def computeNoiseScore(knn_df: DataFrame): DataFrame = {
+    private[ml] def computeNoiseScore(knn_df: DataFrame): DataFrame = {
         // n(e): Number of noisy examples in CN among the k nearest neighbors
         //       of the example e
         val noisy_neighborsUDF = udf {
@@ -225,12 +225,17 @@ class INFFC(override val uid: String) extends Transformer
 
         df_with_properties = df_with_properties  
             // Join so each example has also the properties fo its neighbour 
-            .join(df_with_properties.select(
-                        col("ID").as("neighbor_ID"),
-                        col("noisy_neighbors").as("neighbor_noisy_neighbors"),
-                        col("clean").as("neighbor_clean"),
-                        col("times_in_noisy_neighbourhood").as("neighbor_times_in_noisy_neighbourhood"),
-                        col("confidence").as("neighbor_confidence")),
+            // We need to group by the ID so we don't get duplicated records
+            // (one for each neighbor exploded)
+            .join(df_with_properties
+                    .groupBy("ID")
+                    .agg(
+                        first("noisy_neighbors").as("neighbor_noisy_neighbors"),
+                        first("clean").as("neighbor_clean"),
+                        first("times_in_noisy_neighbourhood").as("neighbor_times_in_noisy_neighbourhood"),
+                        first("confidence").as("neighbor_confidence")
+                    )
+                    .withColumnRenamed("ID", "neighbor_ID"),
                   col("neighbor.ID") === col("neighbor_ID"))
             // Now pack the properties we just joined into a new neighbour struct
             .withColumn("neighbor",
