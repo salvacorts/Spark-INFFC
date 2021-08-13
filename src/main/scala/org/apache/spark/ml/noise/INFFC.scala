@@ -82,10 +82,17 @@ class INFFC(override val uid: String) extends Transformer
         var stopCriteriaIters = 0
 
         while (stopCriteriaIters < $(stopCriteriaG)) {
+            logger.debug("New iteration")
+
             val noise_free_df = preliminaryNoiseFilter(ensemble, current_df)
+            logger.debug("Done with Preliminary Noise Filtering")
+
             val filtered_df = noiseFreeFiltering(ensemble, current_df, noise_free_df)
+            logger.debug("Done with Noise-Free Filtering")
             
             val n_noisy_examples = current_df.count() - filtered_df.count()
+            logger.debug(s"$n_noisy_examples noisy examples removed")
+
             if (n_noisy_examples < stopCriteriaNoiseExamples) {
                 stopCriteriaIters += 1
                 logger.info(s"Iteration $stopCriteriaIters out of ${$(stopCriteriaG)} with samples bellow threshold")
@@ -96,7 +103,6 @@ class INFFC(override val uid: String) extends Transformer
             }
 
             current_df = filtered_df
-            logger.debug(s"Current Size: ${current_df.count()}")
         }
 
         logger.info("Dataset cleaned")
@@ -108,6 +114,7 @@ class INFFC(override val uid: String) extends Transformer
             vote_ensemble: VoteEnsemble,
             dataset: DataFrame): DataFrame = {    
         val vote_result = vote_ensemble.fit(dataset).transform(dataset)
+        logger.debug("Trained voting ensemble on noisy set")
         vote_result.filter("noisy == false")
     }
 
@@ -119,8 +126,7 @@ class INFFC(override val uid: String) extends Transformer
             .fit(noise_free_df)
             .transform(dataset)
             .withColumn("ID", monotonically_increasing_id())
-        logger.debug(vote_result.schema.treeString)
-        if (logger.getLevel() == Level.DEBUG) vote_result.show()
+        logger.debug("Trained voting ensemble on noise-free set")
 
         val knn = new KNN()
             .setTopTreeSize(10)
@@ -132,22 +138,10 @@ class INFFC(override val uid: String) extends Transformer
         // See: https://github.com/saurfang/spark-knn/issues/7
         val knn_model = knn.fit(vote_result).setK($(K)+1)
         val knn_result = knn_model.transform(vote_result)
-        logger.debug(knn_result.schema.treeString)
-        if (logger.getLevel() == Level.DEBUG) knn_result.show()
-        // if (logger.getLevel() == Level.DEBUG) {
-        //     val str = new StringBuilder("Samples: ")
-        //     knn_result.collect.foreach(s => {
-        //         str ++= s"\nSample: ${s.getAs[Vector]($(featuresCol))} - ${s.getAs[Double]($(labelCol))} - ${s.getAs[Boolean]("noisy")}\n"
-        //         s.getAs[mutable.WrappedArray[Row]]("neighbors").foreach(n => {
-        //             str ++= s"Neighbor: ${n.getAs[Vector]($(featuresCol))} - ${n.getAs[Double]($(labelCol))} - ${n.getAs[Boolean]("noisy")}\n"
-        //         })
-        //     })
-        //     logger.debug(str.toString())
-        // }
+        logger.debug("done with KNN")
 
         val df_with_noiseScore = computeNoiseScore(knn_result)
-        logger.debug(df_with_noiseScore.schema.treeString)
-        if (logger.getLevel() == Level.DEBUG) df_with_noiseScore.show()
+        logger.debug("NS Computed")
 
         // Filter clean data and drop all the columns but the original ones
         df_with_noiseScore
