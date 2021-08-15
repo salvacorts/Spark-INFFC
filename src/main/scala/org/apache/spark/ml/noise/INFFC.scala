@@ -58,8 +58,8 @@ class INFFC(override val uid: String) extends Transformer
 
     def this() = this(Identifiable.randomUID("INFFC"))
     
-    def setLabelCol(value: String): this.type =  set(labelCol, value)
-    def setFeaturesCol(value: String): this.type =  set(featuresCol, value)
+    def setLabelCol(value: String): this.type = set(labelCol, value)
+    def setFeaturesCol(value: String): this.type = set(featuresCol, value)
     def setClassifiers(value: Array[Estimator[_]]): this.type = set(classifiers, value)
     def setVotingSchema(value: VotingSchema.VotingSchema): this.type = set(votingSchema, value)
     def setK(value: Int): this.type = set(K, value)
@@ -90,6 +90,8 @@ class INFFC(override val uid: String) extends Transformer
             val filtered_df = noiseFreeFiltering(ensemble, current_df, noise_free_df)
             logger.debug("Done with Noise-Free Filtering")
             
+            current_df.cache()
+            filtered_df.cache()
             val n_noisy_examples = current_df.count() - filtered_df.count()
             logger.debug(s"$n_noisy_examples noisy examples removed")
 
@@ -102,6 +104,7 @@ class INFFC(override val uid: String) extends Transformer
                 logger.debug(s"Resetting stop iterations counter")
             }
 
+            current_df.unpersist()
             current_df = filtered_df
         }
 
