@@ -1,6 +1,5 @@
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.functions._
-import org.apache.spark.ml.noise.INFFC
 import util.Random
 import org.apache.log4j.{Logger, Level}
 import org.apache.spark.sql.types.StructType
@@ -11,6 +10,9 @@ import org.apache.spark.ml.classification.DecisionTreeClassifier
 import org.apache.spark.ml.classification.RandomForestClassifier
 import org.apache.spark.ml.classification.LogisticRegression
 import org.apache.spark.ml.noise.VotingSchema
+import org.apache.spark.ml.noise.RandomNoise
+import org.apache.spark.ml.noise.INFFC
+
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 
 object Main {
@@ -22,8 +24,11 @@ object Main {
             .getOrCreate()
         spark.sparkContext.setLogLevel("ERROR")
 
-        val susy_train_path = sys.env("SUSY_TRAIN_PATH")
-        val susy_test_path = sys.env("SUSY_TEST_PATH")
+        val susy_train_path = args(0)
+        val susy_test_path = args(1)
+        val noise_percentage = args(2).toDouble
+
+        println(s"Noise percentage: $noise_percentage")
         println(s"Loading susy dataset from:")
         println(s"\tTrain: $susy_train_path")
         println(s"\tTest: $susy_test_path")
@@ -73,7 +78,11 @@ object Main {
         val train_df_ml = vector_assembler.transform(train_df)
         val test_df_ml = vector_assembler.transform(test_df)
 
-        val noisy_train_df = addRandomNoise(train_df_ml, 0.2, "class")
+        val random_noise = new RandomNoise()
+            .setLabelCol("class")
+            .setNoisePercentage(noise_percentage)
+
+        val noisy_train_df = random_noise.transform(train_df_ml)
         noisy_train_df.cache()
         
         val tree = new DecisionTreeClassifier()
@@ -141,40 +150,5 @@ object Main {
         println(s"Clean test: Accuracy=$clean_test_accuracy -- F1=$clean_test_f1")
 
         spark.close()
-    }
-
-    // TODO: Move to library
-    def addRandomNoise(df: DataFrame,
-                       noise_percentage: Double,
-                       label_col: String = "label"): DataFrame = {
-
-        val labels = df
-            .select(col(label_col))
-            .distinct()
-            .collect()
-            .map(_.getAs[Double](label_col))
-        val labels_broadcast = df.sparkSession.sparkContext.broadcast(labels)
-
-        val df_size = df.count().toInt
-        val n_examples_noise = math.round(df_size * noise_percentage).toInt
-        val range = Random.shuffle(0 to (df_size-1))
-
-        val noise_index = range.take(n_examples_noise)
-        val noise_index_broadcast = df.sparkSession.sparkContext.broadcast(noise_index)
-
-        val noiseUDF = udf {
-            (idx: Integer, original_label: Double) => {
-                if (noise_index_broadcast.value.contains(idx)) {
-                    val candidate_labels = labels_broadcast.value.diff(List(original_label))
-                    candidate_labels(Random.nextInt(candidate_labels.length))
-                } else {
-                    original_label
-                }
-            }
-        }
-
-        df.withColumn("IDX", monotonicallyIncreasingId)
-            .withColumn(label_col, noiseUDF(col("IDX"), col(label_col)))
-            .drop("IDX")
     }
 }
