@@ -9,6 +9,9 @@ import org.apache.spark.ml.Estimator
 import org.apache.spark.ml.classification.DecisionTreeClassifier
 import org.apache.spark.ml.classification.RandomForestClassifier
 import org.apache.spark.ml.classification.LogisticRegression
+import org.apache.spark.ml.classification.KNNClassifier
+import org.apache.spark.ml.classification.NaiveBayes
+
 import org.apache.spark.ml.noise.VotingSchema
 import org.apache.spark.ml.noise.RandomNoise
 import org.apache.spark.ml.noise.INFFC
@@ -59,14 +62,14 @@ object Main {
                          "delimiter" -> ",",
                          "header" -> "false"))
             .schema(schema)
-            .csv(s"file://$susy_train_path")
+            .csv(susy_train_path)
 
         val test_df = spark.read
             .options(Map("inferSchema" -> "false",
                          "delimiter" -> ",",
                          "header" -> "false"))
             .schema(schema)
-            .csv(s"file://$susy_test_path")
+            .csv(susy_test_path)
 
         println(s"SUSY Train size: ${train_df.count()} instances")
         println(s"SUSY Test size: ${test_df.count()} instances")
@@ -88,6 +91,7 @@ object Main {
         val tree = new DecisionTreeClassifier()
             .setLabelCol("class")
             .setFeaturesCol("features")
+            .setMaxDepth(20)
 
         val evaluator = new MulticlassClassificationEvaluator()
             .setLabelCol("class")
@@ -107,14 +111,16 @@ object Main {
         println(s"Noisy test: Accuracy=$noisy_test_accuracy -- F1=$noisy_test_f1")
 
         val classifiers = Array[Estimator[_]](
-            new DecisionTreeClassifier()
+            new NaiveBayes()
                 .setLabelCol("class")
-                .setFeaturesCol("features"),
+                .setFeaturesCol("features")
+                .setModelType("gaussian"),
 
             new RandomForestClassifier()
                 .setLabelCol("class")
                 .setFeaturesCol("features")
-                .setNumTrees(10),
+                .setNumTrees(10)
+                .setMaxDepth(12),
 
             new LogisticRegression()
                 .setLabelCol("class")
@@ -131,8 +137,8 @@ object Main {
             .setStopCriteriaG(3)
             .setStopCriteriaP(0.01)
 
-        val infcc_logger = Logger.getLogger(infcc.getClass)
-        infcc_logger.setLevel(Level.DEBUG)
+        Logger.getLogger("INFFC").setLevel(Level.DEBUG)
+        Logger.getLogger("VoteEnsemble").setLevel(Level.DEBUG)
 
         val clean_train_df = infcc.transform(noisy_train_df)
         println(s"Initial df size: ${noisy_train_df.count()}")

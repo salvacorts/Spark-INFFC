@@ -12,7 +12,7 @@ import org.apache.spark.sql.{Dataset, DataFrame}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.ml.knn.KNN
-import org.apache.log4j.{Logger, Level}
+import org.apache.log4j.Logger
 import org.apache.spark.ml.linalg.{Vector, Vectors}
 import scala.collection.mutable
 import org.apache.spark.sql.Row

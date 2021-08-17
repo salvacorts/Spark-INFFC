@@ -18,6 +18,8 @@ import org.apache.spark.sql.types.DoubleType
 import org.apache.spark.ml.param.shared.HasLabelCol
 import org.apache.spark.ml.param.shared.HasFeaturesCol
 import org.apache.spark.sql.types.BooleanType
+import org.apache.log4j.Logger
+import org.apache.log4j.Level
 
 object VotingSchema extends Enumeration{
     type VotingSchema = Value
@@ -35,7 +37,7 @@ trait VoteEnsembleParams extends Params with HasLabelCol {
 
 class VoteEnsembleModel(override val uid: String,
                         val models: Array[Model[_]])
-    extends Model[VoteEnsembleModel] with VoteEnsembleParams {
+        extends Model[VoteEnsembleModel] with VoteEnsembleParams {
 
     def this(models: Array[Model[_]]) =
         this(Identifiable.randomUID("VoteEnsembleModel"), models)
@@ -62,7 +64,7 @@ class VoteEnsembleModel(override val uid: String,
             .drop(pred_cols:_*)
             .drop("id")
 
-        val noisyUDF = udf { (predictions: Array[Double], label: Double) => {
+        val noisyUDF = udf { (predictions: Seq[Double], label: Double) => {
             val votes = predictions.map(p => {if (p != label) true else false})
             if ($(votingSchema) == VotingSchema.Majority) {
                 votes.groupBy(identity).mapValues(_.size).maxBy(_._2)._1
@@ -84,8 +86,9 @@ class VoteEnsembleModel(override val uid: String,
     override def copy(extra: ParamMap): VoteEnsembleModel = defaultCopy(extra)
 }
 
-class VoteEnsemble(override val uid: String)
-    extends Estimator[VoteEnsembleModel] with VoteEnsembleParams {
+class VoteEnsemble(override val uid: String) extends Estimator[VoteEnsembleModel]
+                                             with VoteEnsembleParams {
+    private val logger = Logger.getLogger(getClass.getName)
 
     def this() = this(Identifiable.randomUID("VoteEnsemble"))
 
@@ -93,7 +96,13 @@ class VoteEnsemble(override val uid: String)
     def setVotingSchema(value: VotingSchema.VotingSchema): this.type = set(votingSchema, value)
     def setLabelCol(value: String): this.type =  set(labelCol, value)
 
-    override def fit(dataset: Dataset[_]): VoteEnsembleModel = {        
+    override def fit(dataset: Dataset[_]): VoteEnsembleModel = {  
+        if (logger.getLevel() == Level.DEBUG) {
+            val str = new StringBuilder("Using these classifiers:\n")
+            $(classifiers).foreach(c => {str ++= s"\t${c.getClass.getName}\n"})
+            logger.debug(str)
+        }
+        
         val trained_models = $(classifiers).map(classifier => {
             classifier.fit(dataset).asInstanceOf[Model[_]]
         })
