@@ -23,6 +23,9 @@ import org.apache.spark.sql.catalyst.StructFilters
 import org.apache.spark.sql.types.StructField
 import org.apache.spark.sql.types.IntegerType
 
+/**
+  * Parameters of the INFFC noise filtering method
+  */
 trait INFFCParams extends Params
                   with HasLabelCol
                   with HasFeaturesCol
@@ -51,6 +54,37 @@ trait INFFCParams extends Params
     setDefault(stopCriteriaP, 0.01)
 }
 
+/**
+  * Class Noise Filtering method.
+  * 
+  * It combines multiple classifiers in order to remove noisy instances in
+  * multiple iterations by computing a noise metric.
+  * 
+  * This proposal consists of three steps that are performed in each iteration:
+  * 
+  * - Preliminary filtering: First an ensemble of classifiers is used to filter
+  *                          potential noisy examples in order to reduce its
+  *                          impact in the following steps.
+  * 
+  * - Noise-free filtering: Another ensemble is built from the preliminary
+  *                         filtered data from the previous step. Then, this
+  *                         ensemble is used to predict the whole dataset.
+  *                         This process results in two sets of data: a clean
+  *                         set and a noisy set, both of them expected to be
+  *                         more accurate since they are built from cleaner data.
+  * 
+  * - Final removal of noise: The final step of each iteration controls the level
+  *                           of conservation of the filter.
+  *                           A noise score is computed for each potentially
+  *                           noisy example from the noisy set of data.
+  *                           By using a configurable threshold, examples whose
+  *                           noise score exceeds that threshold are filtered out.
+  * 
+  * This process is applied iteratively until for a configurable number
+  * {@code stopCriteriaG} of consecutive iterations, the number of examples
+  * tagged as noisy is less than a certain percentage {@code stopCriteriaP}
+  * of the size of the original training dataset.
+  */
 class INFFC(override val uid: String) extends Transformer
                                       with INFFCParams
                                       with Serializable {
@@ -67,6 +101,14 @@ class INFFC(override val uid: String) extends Transformer
     def setStopCriteriaG(value: Int): this.type = set(stopCriteriaG, value)
     def setStopCriteriaP(value: Double): this.type = set(stopCriteriaP, value)
 
+    /** 
+     * Filters out noise from the input dataset
+     * 
+     * @param dataset Dataset to remove noise from
+     * 
+     * @return a new DataFrame with the same structure and content
+     *          as {@code dataset} but with noisy rows filtered out
+     */
     override def transform(dataset: Dataset[_]): DataFrame = {
         val ensemble = new VoteEnsemble()
             .setVotingSchema($(votingSchema))
@@ -113,6 +155,17 @@ class INFFC(override val uid: String) extends Transformer
         current_df
     }
 
+    /**
+      * Preliminary Noise Filtering
+      * 
+      * An ensemble of classifiers is used to filter
+      * potential noisy examples in order to reduce its
+      * impact in the following steps.
+      *
+      * @param vote_ensemble ensemble of classifiers for voting
+      * @param dataset dataset to filter
+      * @return a filtered dataset without potentially noisy examples
+      */
     private[ml] def preliminaryNoiseFilter(
             vote_ensemble: VoteEnsemble,
             dataset: DataFrame): DataFrame = {    
@@ -121,6 +174,28 @@ class INFFC(override val uid: String) extends Transformer
         vote_result.filter("noisy == false")
     }
 
+    /**
+      * Noise-free filtering
+      * 
+      * An ensemble is built from the preliminary
+      * filtered data from the previous step. Then, this
+      * ensemble is used to predict the whole dataset.
+      * This process results in two sets of data: a clean
+      * set and a noisy set, both of them expected to be
+      * more accurate since they are built from cleaner data.
+      * 
+      * A noise score is computed for each potentially
+      * noisy example from the noisy set of data.
+      * By using a configurable threshold, examples whose
+      * noise score exceeds that threshold are filtered out.
+      *
+      * @param vote_ensemble ensemble of classifiers for voting
+      * @param dataset dataset to filter
+      * @param noise_free_df dataset without potentially noisy examples
+      * @return the {@code dataset} DataFrame filtered out after computing
+      *         the noise score. Those examples with a noise score higher than
+      *         {@code noiseScoreThreshold} are removed.
+      */
     private[ml] def noiseFreeFiltering(
             vote_ensemble: VoteEnsemble,
             dataset: DataFrame,                    
@@ -153,6 +228,13 @@ class INFFC(override val uid: String) extends Transformer
                     dataset.columns.takeRight(dataset.columns.length-1): _*)
     }
 
+    /**
+      * Compute the noise score
+      *
+      * @param knn_df dataframe with neighbors computed
+      * @return dataframe with neiughbors and examples properties and
+      *         noise score computed
+      */
     private[ml] def computeNoiseScore(knn_df: DataFrame): DataFrame = {
         // n(e): Number of noisy examples in CN among the k nearest neighbors
         //       of the example e
