@@ -9,6 +9,10 @@ import org.apache.spark.sql.types.IntegerType
 import org.apache.spark.sql.types.ArrayType
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.functions._
+import org.apache.spark.ml.classification.RandomForestClassifier
+import org.apache.spark.ml.classification.LogisticRegression
+import org.apache.spark.ml.classification.NaiveBayes
+import org.apache.spark.ml.Estimator
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -16,6 +20,7 @@ import org.scalatest.BeforeAndAfterAll
 import scala.collection.mutable
 import util.Random
 import org.apache.log4j.{Logger, Level}
+import org.apache.spark.ml.feature.VectorAssembler
 
 class INFCCSuite
         extends AnyFunSuite
@@ -35,6 +40,58 @@ class INFCCSuite
 
     override def afterAll(): Unit = {
         spark.close()
+    }
+
+    test("Voting Ensemble") {
+        val data = Seq(
+            Row(1, 1234, 1234, 0.0),
+            Row(2, 2234, 2234, 1.0),
+            Row(3, 3234, 3234, 0.0),
+            Row(4, 4234, 4234, 1.0),
+            Row(5, 5234, 5234, 1.0)
+        )
+
+        val schema = new StructType()
+            .add("ID", IntegerType)
+            .add("feature_one", IntegerType)
+            .add("feature_two", IntegerType)
+            .add("label", DoubleType)
+
+        val df = spark.createDataFrame(
+            spark.sparkContext.parallelize(data),
+            schema)
+
+        val vector_assembler = new VectorAssembler()
+            .setInputCols(Array("feature_one", "feature_two"))
+            .setOutputCol("features")
+
+        val df_ml = vector_assembler.transform(df)
+
+        val classifiers = Array[Estimator[_]](
+            new NaiveBayes()
+                .setLabelCol("label")
+                .setFeaturesCol("features")
+                .setModelType("gaussian"),
+
+            new LogisticRegression()
+                .setLabelCol("label")
+                .setFeaturesCol("features")
+        )
+
+        val ensemble = new VoteEnsemble()
+            .setLabelCol("label")
+            .setClassifiers(classifiers)
+            .setVotingSchema(VotingSchema.Consensus)
+
+        val ensemble_model = ensemble.fit(df_ml)
+
+        val df_votes = ensemble_model.transform(df_ml)
+
+        df_votes.printSchema()
+        df_votes.show()
+
+        df_votes.columns should contain ("predictions")
+        df_votes.columns should contain ("noisy")
     }
 
     test("Noise Score") {
