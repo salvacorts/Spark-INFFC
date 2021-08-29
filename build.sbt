@@ -33,4 +33,4 @@ lazy val examples = (project in file("examples"))
     )
     .dependsOn(root)
 
-Test / parallelExecution := false
+parallelExecution in Test := false
